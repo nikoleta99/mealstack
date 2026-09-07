@@ -496,7 +496,6 @@
     border-radius:8px; padding:8px 6px; font-size:.78rem; font-weight:600; cursor:pointer; font-family:var(--font-body);
   }
   .seg-btn.active{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
-  .seg-btn:disabled{opacity:.45; cursor:not-allowed;}
   .import-note{font-size:.78rem; color:var(--ink-soft); margin:0 0 6px; line-height:1.4;}
   .import-panel{display:none;}
   .import-panel.active{display:block;}
@@ -555,15 +554,16 @@
     {key:"thu",label:"Thu"},{key:"fri",label:"Fri"},{key:"sat",label:"Sat"},{key:"sun",label:"Sun"}
   ];
   var IMPORT_TEXT_LIMIT = 6000;
+  var STORAGE_KEY = "mealstack_data_v1";
 
   function catColor(cat){ return getComputedStyle(document.documentElement).getPropertyValue(CAT_VAR[cat]||"--ink-soft").trim(); }
   function uid(p){ return p+"_"+Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4); }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
 
-  // ---------------- sample seed data (used when db unavailable, or to seed db on first run) ----------------
+  // ---------------- sample seed data (used on first run) ----------------
   function sampleRecipes(){
     return [
-      {id:"r1", title:"Weeknight Chicken Stir-Fry", category:"Dinner", servings:4, prepTime:"25 min", caloriesPerServing:430, sample:true,
+      {id:"r1", title:"Weeknight Chicken Stir-Fry", category:"Dinner", servings:4, prepTime:"25 min", caloriesPerServing:580, sample:true,
         ingredients:[
           {name:"Chicken breast",qty:1,unit:"lb",aisle:"Meat & Seafood"},
           {name:"Broccoli florets",qty:3,unit:"cups",aisle:"Produce"},
@@ -575,7 +575,7 @@
           {name:"Rice",qty:2,unit:"cups",aisle:"Pantry & Grains"}
         ],
         steps:["Cook rice according to package.","Slice chicken and vegetables.","Stir-fry chicken until browned, remove.","Stir-fry vegetables 3-4 min, add garlic and ginger.","Return chicken, add soy sauce and sesame oil, toss 2 min.","Serve over rice."]},
-      {id:"r2", title:"Greek Yogurt Pancakes", category:"Breakfast", servings:2, prepTime:"15 min", caloriesPerServing:350, sample:true,
+      {id:"r2", title:"Greek Yogurt Pancakes", category:"Breakfast", servings:2, prepTime:"15 min", caloriesPerServing:440, sample:true,
         ingredients:[
           {name:"Eggs",qty:2,unit:"",aisle:"Dairy & Eggs"},
           {name:"Greek yogurt",qty:1,unit:"cup",aisle:"Dairy & Eggs"},
@@ -585,7 +585,7 @@
           {name:"Milk",qty:0.25,unit:"cup",aisle:"Dairy & Eggs"}
         ],
         steps:["Whisk eggs, yogurt, honey and milk.","Fold in flour and baking powder until just combined.","Cook 1/4 cup portions on a hot griddle, 2 min per side."]},
-      {id:"r3", title:"Weeknight Lentil Soup", category:"Lunch", servings:4, prepTime:"40 min", caloriesPerServing:220, sample:true,
+      {id:"r3", title:"Weeknight Lentil Soup", category:"Lunch", servings:4, prepTime:"40 min", caloriesPerServing:305, sample:true,
         ingredients:[
           {name:"Green lentils",qty:1.5,unit:"cups",aisle:"Pantry & Grains"},
           {name:"Carrot",qty:2,unit:"",aisle:"Produce"},
@@ -596,7 +596,7 @@
           {name:"Cumin",qty:1,unit:"tsp",aisle:"Pantry & Grains"}
         ],
         steps:["Saute onion, carrot, celery, garlic until soft.","Add lentils, broth and cumin.","Simmer 30 min until lentils are tender.","Season and serve."]},
-      {id:"r4", title:"Caprese Salad", category:"Snack", servings:2, prepTime:"10 min", caloriesPerServing:280, sample:true,
+      {id:"r4", title:"Caprese Salad", category:"Snack", servings:2, prepTime:"10 min", caloriesPerServing:465, sample:true,
         ingredients:[
           {name:"Tomato",qty:2,unit:"",aisle:"Produce"},
           {name:"Fresh mozzarella",qty:8,unit:"oz",aisle:"Dairy & Eggs"},
@@ -605,7 +605,7 @@
           {name:"Balsamic vinegar",qty:1,unit:"tbsp",aisle:"Pantry & Grains"}
         ],
         steps:["Slice tomato and mozzarella.","Layer with basil leaves.","Drizzle with olive oil and balsamic."]},
-      {id:"r5", title:"Baked Salmon with Asparagus", category:"Dinner", servings:2, prepTime:"25 min", caloriesPerServing:380, sample:true,
+      {id:"r5", title:"Baked Salmon with Asparagus", category:"Dinner", servings:2, prepTime:"25 min", caloriesPerServing:510, sample:true,
         ingredients:[
           {name:"Salmon fillet",qty:2,unit:"",aisle:"Meat & Seafood"},
           {name:"Asparagus",qty:1,unit:"bunch",aisle:"Produce"},
@@ -633,106 +633,48 @@
     grocery: [],
     showBanner: true
   };
-  var hasDb = false, db = null;
-  var sampler = null, sampleHidden = false;
-  try{ state.showBanner = localStorage.getItem("ll_banner_dismissed") !== "1"; }catch(e){}
+  var storageAvailable = true;
+  try{ state.showBanner = localStorage.getItem("mealstack_banner_dismissed") !== "1"; }catch(e){}
 
-  if (window.claude && window.claude.use){
-    window.claude.use("sample").then(function(ns){ sampler = ns; }).catch(function(){ sampler = null; });
-  }
-
-  // ---------------- db wiring (falls back to local sample state if unavailable) ----------------
-  function initData(){
-    if (!window.claude || !window.claude.use){ loadLocalSample(); render(); return; }
-    window.claude.use("db").then(function(ns){
-      if (!ns){ loadLocalSample(); render(); return; }
-      db = ns; hasDb = true;
-      db.collection("recipes").onSnapshot(function(snap){
-        state.recipes = snap.docs.map(function(d){ return Object.assign({}, d.data(), {id:d.id}); });
-        render();
-      }, function(){ /* stay on whatever we have */ });
-      db.doc("plan/current").onSnapshot(function(snap){
-        var d = snap.exists ? snap.data() : null;
-        state.plan = {days: Object.assign({mon:[],tue:[],wed:[],thu:[],fri:[],sat:[],sun:[]}, (d&&d.days)||{})};
-        render();
-      }, function(){});
-      db.collection("groceryItems").onSnapshot(function(snap){
-        state.grocery = snap.docs.map(function(d){ return Object.assign({}, d.data(), {id:d.id}); });
-        render();
-      }, function(){});
-      // seed once if empty
-      db.collection("recipes").limit(1).get().then(function(qs){
-        if (qs.empty){ seedDb(); }
-      });
-    }).catch(function(){ loadLocalSample(); render(); });
-  }
-  function loadLocalSample(){
-    state.dbUnavailable = true;
+  // ---------------- persistence (browser localStorage — no account, no server) ----------------
+  function emptyDays(){ return {mon:[],tue:[],wed:[],thu:[],fri:[],sat:[],sun:[]}; }
+  function seedSampleState(){
     state.recipes = sampleRecipes();
     state.plan = samplePlan();
-    state.plan.days = Object.assign({mon:[],tue:[],wed:[],thu:[],fri:[],sat:[],sun:[]}, state.plan.days);
+    state.plan.days = Object.assign(emptyDays(), state.plan.days);
     state.grocery = sampleGrocery();
   }
-  function seedDb(){
-    var batchRecipes = sampleRecipes();
-    batchRecipes.forEach(function(r){
-      var body = Object.assign({}, r); var id = body.id; delete body.id;
-      db.collection("recipes").doc(id).set(body);
-    });
-    db.doc("plan/current").set(samplePlan());
-    sampleGrocery().forEach(function(g){
-      var body = Object.assign({}, g); var id = body.id; delete body.id;
-      db.collection("groceryItems").doc(id).set(body);
-    });
+  function persist(){
+    if (!storageAvailable) return;
+    try{
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({recipes:state.recipes, plan:state.plan, grocery:state.grocery}));
+    }catch(e){
+      storageAvailable = false;
+      state.storageUnavailable = true;
+      render();
+    }
+  }
+  function initData(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw){
+        var parsed = JSON.parse(raw);
+        state.recipes = Array.isArray(parsed.recipes) ? parsed.recipes : [];
+        state.plan = {days: Object.assign(emptyDays(), (parsed.plan&&parsed.plan.days)||{})};
+        state.grocery = Array.isArray(parsed.grocery) ? parsed.grocery : [];
+      } else {
+        seedSampleState();
+        persist();
+      }
+    }catch(e){
+      storageAvailable = false;
+      state.storageUnavailable = true;
+      seedSampleState();
+    }
+    render();
   }
 
-  // ---------------- mutations ----------------
-  // Every hasDb write below RETURNS its promise so callers can show real
-  // success/failure feedback instead of assuming a write worked.
-  function describeError(e){
-    if (e===undefined) return "undefined";
-    if (e===null) return "null";
-    if (typeof e==="string") return e;
-    var parts = [];
-    if (e.code) parts.push("code="+e.code);
-    if (e.message) parts.push("message="+e.message);
-    if (e.name && e.name!=="Error") parts.push("name="+e.name);
-    if (!parts.length){
-      try{ parts.push(JSON.stringify(e)); }catch(_){ parts.push(Object.prototype.toString.call(e)); }
-    }
-    return parts.join(" | ");
-  }
-  function dbErrorCopy(e){
-    var code = e && e.code;
-    var msg;
-    if (code==="quota_exceeded") msg = "Your recipe box is full — delete something to make room.";
-    else if (code==="resource_exhausted") msg = "Too many changes at once — wait a moment and try again.";
-    else if (code==="revoked") msg = "This page lost access to your saved data — reload it and try again.";
-    else if (code==="invalid_argument") msg = "That didn't save — something about the data wasn't valid.";
-    else if (code==="timeout") msg = "That's taking too long — your change may not have saved. Try again.";
-    else if (code==="not_granted" || code==="capability_disabled" || code==="capability_removed"){
-      msg = "This page doesn't have permission to save right now — make sure you're signed in to Claude in this browser, then reopen the link.";
-    }
-    else msg = "Couldn't save that change.";
-    return msg + "  [" + describeError(e) + "]";
-  }
-  function withTimeout(promise, ms){
-    return new Promise(function(resolve, reject){
-      var settled = false;
-      var t = setTimeout(function(){
-        if (settled) return;
-        settled = true;
-        reject({code:"timeout", message:"timed out"});
-      }, ms);
-      promise.then(function(v){
-        if (settled) return;
-        settled = true; clearTimeout(t); resolve(v);
-      }, function(e){
-        if (settled) return;
-        settled = true; clearTimeout(t); reject(e);
-      });
-    });
-  }
+  // ---------------- mutations (all synchronous — persist() writes to localStorage) ----------------
   var toastTimer = null;
   function toast(msg){
     var el = document.getElementById("toast");
@@ -742,93 +684,191 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function(){ el.classList.remove("show"); }, 4000);
   }
-  function waitUntil(predicate, timeoutMs){
-    return new Promise(function(resolve){
-      var start = Date.now();
-      (function poll(){
-        if (predicate()){ resolve(true); return; }
-        if (Date.now()-start > timeoutMs){ resolve(false); return; }
-        setTimeout(poll, 150);
-      })();
-    });
-  }
-  function refreshRecipesOnce(){
-    return db.collection("recipes").get().then(function(qs){
-      state.recipes = qs.docs.map(function(d){ return Object.assign({}, d.data(), {id:d.id}); });
-      render();
-    });
-  }
   function saveRecipe(data, existingId){
     if (existingId){
-      if (hasDb){
-        return db.doc("recipes/"+existingId).update(data).then(function(){
-          // the live listener USUALLY reflects this fast; if it hasn't after a
-          // beat, pull a fresh read ourselves rather than leaving the screen stale
-          return waitUntil(function(){
-            var r = state.recipes.find(function(x){return x.id===existingId;});
-            return r && r.title===data.title;
-          }, 2500);
-        }).then(function(synced){ if (!synced) return refreshRecipesOnce(); });
-      }
       var i=state.recipes.findIndex(function(r){return r.id===existingId;});
       if(i>-1) state.recipes[i]=Object.assign({},state.recipes[i],data);
-      render();
-      return Promise.resolve();
+    } else {
+      data.sample = false;
+      data.id = uid("r");
+      state.recipes.push(data);
     }
-    data.sample = false;
-    if (hasDb){
-      return db.collection("recipes").add(data).then(function(ref){
-        return waitUntil(function(){
-          return state.recipes.some(function(r){return r.id===ref.id;});
-        }, 2500).then(function(synced){
-          if (synced) return ref;
-          return refreshRecipesOnce().then(function(){ return ref; });
-        });
-      });
-    }
-    data.id = uid("r"); state.recipes.push(data); render();
-    return Promise.resolve();
+    persist();
   }
   function deleteRecipe(id){
-    var p;
-    if (hasDb){ p = db.doc("recipes/"+id).delete(); }
-    else { state.recipes = state.recipes.filter(function(r){return r.id!==id;}); p = Promise.resolve(); }
+    state.recipes = state.recipes.filter(function(r){return r.id!==id;});
     Object.keys(state.plan.days).forEach(function(k){
       state.plan.days[k] = state.plan.days[k].filter(function(rid){return rid!==id;});
     });
-    p.then(function(){
-      if (hasDb){ return db.doc("plan/current").update({days: state.plan.days}); }
-      render();
-    }).catch(function(e){ toast(dbErrorCopy(e)); });
-    return p;
+    persist();
+    render();
   }
   function toggleDayRecipe(day, recipeId){
     var arr = (state.plan.days[day]||[]).slice();
     var idx = arr.indexOf(recipeId);
     if (idx>-1) arr.splice(idx,1); else arr.push(recipeId);
-    if (hasDb){
-      var patch={days:{}}; patch.days[day]=arr;
-      db.doc("plan/current").update(patch).catch(function(e){ toast(dbErrorCopy(e)); });
-    }
-    else { state.plan.days[day]=arr; render(); }
+    state.plan.days[day]=arr;
+    persist();
+    render();
   }
   function formatQty(qty, unit){
     if (qty===null || qty===undefined || qty==="") return unit||"";
     var n = (typeof qty==="number") ? (qty % 1 === 0 ? qty : qty.toFixed(2).replace(/0+$/,"").replace(/\.$/,"")) : qty;
     return (n + (unit?(" "+unit):"")).trim();
   }
-  function estimateCaloriesPerServing(ingredients, servings){
-    if (!sampler || sampleHidden || !ingredients || !ingredients.length) return Promise.resolve(null);
-    var ingList = ingredients.map(function(i){ return formatQty(i.qty,i.unit)+" "+i.name; }).join("; ");
-    var prompt = "Estimate calories per serving for a home-cooked recipe with these ingredients: "+ingList+
-      ". Servings: "+(servings||"unspecified, assume a typical serving size")+". "+
-      "Reply with ONLY a JSON object of exactly this shape: {\"caloriesPerServing\": number}. "+
-      "Give your best reasonable whole-number estimate — never reply with null or leave it out.";
-    return withTimeout(sampler.json(prompt, {modelTier:"quick", cache:false}), 20000).then(function(res){
-      var n = res && Number(res.caloriesPerServing);
-      return (typeof n==="number" && isFinite(n) && n>0) ? Math.round(n) : null;
-    }).catch(function(){ return null; });
+
+  // ---------------- calorie estimate (deterministic, offline — gram weights + calories/100g) ----------------
+  // Approximate USDA-ballpark figures for common home-cooking ingredients. Not a substitute
+  // for a real nutrition label — ingredients outside this list simply aren't counted.
+  var UNIT_ALIASES = {
+    "cup":"cup","cups":"cup","c":"cup",
+    "tbsp":"tbsp","tablespoon":"tbsp","tablespoons":"tbsp","tbs":"tbsp",
+    "tsp":"tsp","teaspoon":"tsp","teaspoons":"tsp",
+    "g":"g","gram":"g","grams":"g",
+    "kg":"kg","kilogram":"kg","kilograms":"kg",
+    "oz":"oz","ounce":"oz","ounces":"oz",
+    "lb":"lb","lbs":"lb","pound":"lb","pounds":"lb",
+    "ml":"ml","milliliter":"ml","milliliters":"ml",
+    "l":"l","liter":"l","liters":"l","litre":"l","litres":"l",
+    "clove":"clove","cloves":"clove",
+    "can":"can","cans":"can",
+    "slice":"slice","slices":"slice",
+    "stalk":"stalk","stalks":"stalk",
+    "bunch":"bunch","bunches":"bunch",
+    "handful":"handful","handfuls":"handful",
+    "each":"each","whole":"each"
+  };
+  function canonicalUnit(u){
+    var key = String(u||"").toLowerCase().trim().replace(/\.$/,"");
+    return UNIT_ALIASES[key] || key;
   }
+  var UNIT_TO_GRAMS = { g:1, kg:1000, oz:28.35, lb:453.6, ml:1, l:1000, cup:240, tbsp:15, tsp:5 };
+  var NUTRITION_DB = {
+    "chicken breast": {cal100:165, grams:{lb:453.6}},
+    "chicken thigh": {cal100:209, grams:{lb:453.6}},
+    "chicken": {cal100:172, grams:{lb:453.6}},
+    "ground beef": {cal100:250, grams:{lb:453.6}},
+    "beef": {cal100:250, grams:{lb:453.6}},
+    "steak": {cal100:271, grams:{lb:453.6}},
+    "pork": {cal100:242, grams:{lb:453.6}},
+    "bacon": {cal100:541, grams:{slice:8}},
+    "sausage": {cal100:301, grams:{each:75}},
+    "salmon fillet": {cal100:208, grams:{each:170}},
+    "salmon": {cal100:208, grams:{lb:453.6}},
+    "shrimp": {cal100:99, grams:{lb:453.6}},
+    "tuna": {cal100:132, grams:{can:142}},
+    "egg": {cal100:143, grams:{each:50}},
+    "eggs": {cal100:143, grams:{each:50}},
+    "milk": {cal100:42, grams:{cup:240}},
+    "greek yogurt": {cal100:59, grams:{cup:245}},
+    "yogurt": {cal100:61, grams:{cup:245}},
+    "butter": {cal100:717, grams:{tbsp:14}},
+    "cheddar cheese": {cal100:403, grams:{cup:113}},
+    "cheese": {cal100:403, grams:{cup:113}},
+    "fresh mozzarella": {cal100:280, grams:{oz:28.35}},
+    "mozzarella": {cal100:280, grams:{oz:28.35}},
+    "parmesan": {cal100:431, grams:{tbsp:5}},
+    "cream cheese": {cal100:342, grams:{tbsp:14}},
+    "flour": {cal100:364, grams:{cup:120}},
+    "rice": {cal100:365, grams:{cup:185}},
+    "pasta": {cal100:371, grams:{cup:100}},
+    "spaghetti": {cal100:371, grams:{cup:100}},
+    "bread": {cal100:265, grams:{slice:28}},
+    "tortilla": {cal100:218, grams:{each:45}},
+    "quinoa": {cal100:368, grams:{cup:170}},
+    "oats": {cal100:389, grams:{cup:80}},
+    "green lentils": {cal100:353, grams:{cup:198}},
+    "lentils": {cal100:353, grams:{cup:198}},
+    "black beans": {cal100:132, grams:{cup:172, can:240}},
+    "beans": {cal100:127, grams:{cup:170, can:240}},
+    "chickpeas": {cal100:164, grams:{cup:164, can:240}},
+    "sugar": {cal100:387, grams:{cup:200}},
+    "brown sugar": {cal100:380, grams:{cup:220}},
+    "honey": {cal100:304, grams:{tbsp:21}},
+    "olive oil": {cal100:884, grams:{tbsp:13.5}},
+    "vegetable oil": {cal100:884, grams:{tbsp:13.5}},
+    "sesame oil": {cal100:884, grams:{tbsp:13.5}},
+    "soy sauce": {cal100:53, grams:{tbsp:16}},
+    "balsamic vinegar": {cal100:88, grams:{tbsp:15}},
+    "vinegar": {cal100:18, grams:{tbsp:15}},
+    "baking powder": {cal100:53, grams:{tsp:4.6}},
+    "baking soda": {cal100:0, grams:{tsp:4.6}},
+    "salt": {cal100:0, grams:{tsp:6}},
+    "cumin": {cal100:375, grams:{tsp:2.1}},
+    "black pepper": {cal100:251, grams:{tsp:2.3}},
+    "cinnamon": {cal100:247, grams:{tsp:2.6}},
+    "broccoli florets": {cal100:34, grams:{cup:91}},
+    "broccoli": {cal100:34, grams:{cup:91}},
+    "asparagus": {cal100:20, grams:{bunch:227, each:12}},
+    "bell pepper": {cal100:31, grams:{each:119}},
+    "tomato": {cal100:18, grams:{each:123}},
+    "onion": {cal100:40, grams:{each:110}},
+    "carrot": {cal100:41, grams:{each:61}},
+    "celery": {cal100:14, grams:{stalk:40}},
+    "garlic": {cal100:149, grams:{clove:3}},
+    "fresh ginger": {cal100:80, grams:{tbsp:6}},
+    "ginger": {cal100:80, grams:{tbsp:6}},
+    "potato": {cal100:77, grams:{each:170}},
+    "sweet potato": {cal100:86, grams:{each:130}},
+    "spinach": {cal100:23, grams:{cup:30}},
+    "lettuce": {cal100:15, grams:{cup:36}},
+    "cucumber": {cal100:15, grams:{each:300}},
+    "avocado": {cal100:160, grams:{each:200}},
+    "lemon": {cal100:29, grams:{each:58}},
+    "lime": {cal100:30, grams:{each:67}},
+    "fresh basil": {cal100:23, grams:{handful:10}},
+    "basil": {cal100:23, grams:{handful:10}},
+    "vegetable broth": {cal100:4, grams:{cup:240}},
+    "chicken broth": {cal100:7, grams:{cup:240}},
+    "broth": {cal100:6, grams:{cup:240}},
+    "almonds": {cal100:579, grams:{cup:143}},
+    "walnuts": {cal100:654, grams:{cup:117}},
+    "peanut butter": {cal100:588, grams:{tbsp:16}},
+    "apple": {cal100:52, grams:{each:182}},
+    "banana": {cal100:89, grams:{each:118}}
+  };
+  function normalizeIngredientKey(name){
+    return String(name||"").toLowerCase().replace(/[,(].*$/,"").trim();
+  }
+  function lookupNutrition(name){
+    var key = normalizeIngredientKey(name);
+    if (NUTRITION_DB[key]) return NUTRITION_DB[key];
+    var bestKey = null;
+    Object.keys(NUTRITION_DB).forEach(function(k){
+      if (key.indexOf(k)>-1 && (!bestKey || k.length>bestKey.length)) bestKey = k;
+    });
+    return bestKey ? NUTRITION_DB[bestKey] : null;
+  }
+  function ingredientGrams(ing, nutrition){
+    var qty = typeof ing.qty==="number" ? ing.qty : null;
+    if (qty===null) return null;
+    var unit = canonicalUnit(ing.unit);
+    if (!unit){
+      var each = nutrition.grams && nutrition.grams.each;
+      return each ? qty*each : null;
+    }
+    if (nutrition.grams && nutrition.grams[unit]!=null) return qty*nutrition.grams[unit];
+    if (UNIT_TO_GRAMS[unit]!=null) return qty*UNIT_TO_GRAMS[unit];
+    return null;
+  }
+  function estimateCaloriesPerServing(ingredients, servings){
+    if (!ingredients || !ingredients.length) return null;
+    var totalCal = 0, matched = 0;
+    ingredients.forEach(function(ing){
+      var nutrition = lookupNutrition(ing.name);
+      if (!nutrition) return;
+      var grams = ingredientGrams(ing, nutrition);
+      if (grams===null) return;
+      totalCal += (grams/100) * nutrition.cal100;
+      matched++;
+    });
+    if (!matched) return null;
+    var servingCount = parseFloat(servings);
+    if (!servingCount || servingCount<=0) servingCount = 1;
+    var perServing = totalCal / servingCount;
+    return {calories: Math.max(0, Math.round(perServing/5)*5), matched: matched, total: ingredients.length};
+  }
+
   function generateGroceryList(){
     var ids = [];
     Object.keys(state.plan.days).forEach(function(k){ state.plan.days[k].forEach(function(id){ if(ids.indexOf(id)===-1) ids.push(id); }); });
@@ -849,47 +889,34 @@
     var newItems = Object.keys(map).map(function(k){
       var m = map[k];
       var qtyDisplay = m.qty!==null ? formatQty(m.qty, m.unit) : (m.qtyStrs.length ? m.qtyStrs.join(" + ")+(m.unit?(" "+m.unit):"") : m.unit);
-      return {name:m.name, qty: qtyDisplay, aisle:m.aisle, checked:false, source:"recipe"};
+      return {id:uid("g"), name:m.name, qty: qtyDisplay, aisle:m.aisle, checked:false, source:"recipe"};
     });
-    if (hasDb){
-      db.collection("groceryItems").get().then(function(qs){
-        var toDelete = qs.docs.filter(function(d){ return d.data().source!=="manual"; });
-        return Promise.all(
-          toDelete.map(function(d){ return db.doc("groceryItems/"+d.id).delete(); })
-            .concat(newItems.map(function(it){ return db.collection("groceryItems").add(it); }))
-        );
-      }).then(function(){
-        // pull a fresh read so the list is guaranteed current the moment we switch tabs,
-        // rather than trusting the live listener to have caught up already
-        return db.collection("groceryItems").get().then(function(qs){
-          state.grocery = qs.docs.map(function(d){ return Object.assign({}, d.data(), {id:d.id}); });
-          state.tab = "grocery";
-          render();
-        });
-      }).catch(function(e){ toast(dbErrorCopy(e)); });
-    } else {
-      state.grocery = state.grocery.filter(function(g){return g.source==="manual";}).concat(newItems.map(function(it){ it.id=uid("g"); return it; }));
-      state.tab = "grocery";
-      render();
-    }
+    state.grocery = state.grocery.filter(function(g){return g.source==="manual";}).concat(newItems);
+    state.tab = "grocery";
+    persist();
+    render();
   }
   function addManualItem(name, qty, aisle, store){
-    var item = {name:name, qty:qty||"", aisle:aisle, store:store||"", checked:false, source:"manual"};
-    if (hasDb){ db.collection("groceryItems").add(item).catch(function(e){ toast(dbErrorCopy(e)); }); }
-    else { item.id=uid("g"); state.grocery.push(item); render(); }
+    var item = {id:uid("g"), name:name, qty:qty||"", aisle:aisle, store:store||"", checked:false, source:"manual"};
+    state.grocery.push(item);
+    persist();
+    render();
   }
   function toggleChecked(id, checked){
-    if (hasDb){ db.doc("groceryItems/"+id).update({checked:checked}).catch(function(e){ toast(dbErrorCopy(e)); }); }
-    else { var it=state.grocery.find(function(g){return g.id===id;}); if(it) it.checked=checked; render(); }
+    var it=state.grocery.find(function(g){return g.id===id;});
+    if(it) it.checked=checked;
+    persist();
+    render();
   }
   function deleteGroceryItem(id){
-    if (hasDb){ db.doc("groceryItems/"+id).delete().catch(function(e){ toast(dbErrorCopy(e)); }); }
-    else { state.grocery = state.grocery.filter(function(g){return g.id!==id;}); render(); }
+    state.grocery = state.grocery.filter(function(g){return g.id!==id;});
+    persist();
+    render();
   }
   function clearChecked(){
-    var checked = state.grocery.filter(function(g){return g.checked;});
-    if (hasDb){ checked.forEach(function(g){ db.doc("groceryItems/"+g.id).delete().catch(function(e){ toast(dbErrorCopy(e)); }); }); }
-    else { state.grocery = state.grocery.filter(function(g){return !g.checked;}); render(); }
+    state.grocery = state.grocery.filter(function(g){return !g.checked;});
+    persist();
+    render();
   }
 
   // ---------------- sheets ----------------
@@ -970,7 +997,6 @@
     }
     wireIngRemove();
     document.getElementById("saveRecipeBtn").onclick = function(){
-      var btn = document.getElementById("saveRecipeBtn");
       var statusEl = document.getElementById("saveStatus");
       try{
         var title = document.getElementById("f_title").value.trim();
@@ -996,36 +1022,24 @@
           ingredients:ingredients,
           steps:steps
         };
-        btn.disabled = true; btn.textContent = "Saving...";
-        statusEl.className = "import-status busy"; statusEl.textContent = "Estimating calories...";
-        var savePromise;
-        try{
-          savePromise = estimateCaloriesPerServing(ingredients, data.servings).then(function(cal){
-            data.caloriesPerServing = cal;
-            statusEl.className = "import-status"; statusEl.textContent = "";
-            return withTimeout(saveRecipe(data, existing?existing.id:null), 15000);
-          });
-        }catch(syncErr){
-          savePromise = Promise.reject(syncErr);
-        }
-        savePromise.then(function(){
-          state.recipeFilter = "All";
-          state.tab = "recipes";
-          toast(existing ? "Recipe updated." : "Recipe saved.");
-          closeSheet();
-          render();
-        }).catch(function(e){
-          btn.disabled = false; btn.textContent = "Save Recipe";
-          statusEl.className = "import-status err"; statusEl.textContent = dbErrorCopy(e);
-        });
+        var calResult = estimateCaloriesPerServing(ingredients, data.servings);
+        data.caloriesPerServing = calResult ? calResult.calories : null;
+        state.recipeFilter = "All";
+        state.tab = "recipes";
+        saveRecipe(data, existing?existing.id:null);
+        var msg = existing ? "Recipe updated." : "Recipe saved.";
+        if (calResult && calResult.matched < calResult.total) msg += " Calories estimated from "+calResult.matched+" of "+calResult.total+" ingredients (rest not recognized).";
+        else if (!calResult && ingredients.length) msg += " Couldn't estimate calories — none of these ingredients are in the built-in nutrition list.";
+        toast(msg);
+        closeSheet();
+        render();
       }catch(outerErr){
-        btn.disabled = false; btn.textContent = "Save Recipe";
-        statusEl.className = "import-status err"; statusEl.textContent = "Couldn't save.  [" + describeError(outerErr) + "]";
+        statusEl.className = "import-status err"; statusEl.textContent = "Couldn't save.  [" + (outerErr && outerErr.message ? outerErr.message : outerErr) + "]";
       }
     };
   }
 
-  // ---------------- import (paste text / pdf) ----------------
+  // ---------------- import (paste text / pdf) — rule-based parser, no AI, fully offline ----------------
   var PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
   var PDFJS_WORKER_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
   var pdfjsReady = null;
@@ -1065,52 +1079,93 @@
     });
   }
 
-  function recipeSchemaInstructions(){
-    return 'Reply with ONLY a JSON object, no other text, of exactly this shape:\n'+
-      '{"title": string, "category": one of "Breakfast"|"Lunch"|"Dinner"|"Snack" (your best guess), '+
-      '"servings": string (e.g. "4"), "prepTime": string (e.g. "25 min", combine prep+cook time if both are given), '+
-      '"ingredients": [{"name": string, "qty": number or null, "unit": string (e.g. "cups","cloves","lb"; empty string if none), '+
-      '"aisle": one of "Produce"|"Dairy & Eggs"|"Meat & Seafood"|"Pantry & Grains"|"Frozen"|"Bakery"|"Other" (your best guess for grocery aisle)}], '+
-      '"steps": [string, ...] (one clear action per step)}. '+
-      'Split each ingredient line into name, quantity and unit yourself. If something is missing or unclear, make the most reasonable guess rather than leaving a field empty.';
-  }
-  function normalizeCategory(c){
-    var m = CATEGORIES.find(function(x){ return x.toLowerCase()===String(c||"").toLowerCase(); });
-    return m || "Dinner";
-  }
-  function normalizeAisle(a){
-    var m = AISLES.find(function(x){ return x.toLowerCase()===String(a||"").toLowerCase(); });
-    return m || "Other";
-  }
-  function sanitizeParsedRecipe(obj){
-    obj = obj || {};
-    var ingredients = Array.isArray(obj.ingredients) ? obj.ingredients : [];
-    ingredients = ingredients.filter(function(i){ return i && i.name; }).map(function(i){
-      var qty = i.qty;
-      if (typeof qty !== "number"){ qty = (qty===null||qty===undefined||qty==="") ? null : (isNaN(parseFloat(qty)) ? String(qty) : parseFloat(qty)); }
-      return {name:String(i.name).trim(), qty:qty, unit:String(i.unit||"").trim(), aisle:normalizeAisle(i.aisle)};
+  var UNIT_WORDS = ["cups?","tbsp","tbs","tablespoons?","tsp","teaspoons?","oz","ounces?","lbs?","pounds?","g","grams?","kg","ml","l","liters?","litres?","cloves?","cans?","slices?","stalks?","bunch(?:es)?","handful(?:s)?","pinch(?:es)?","each","whole"];
+  var UNIT_RE = new RegExp("^("+UNIT_WORDS.join("|")+")\\.?$", "i");
+  var QTY_RE = /^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)/;
+  var AISLE_KEYWORDS = {
+    "Meat & Seafood": ["chicken","beef","pork","turkey","salmon","shrimp","fish","bacon","sausage","tuna","steak","lamb"],
+    "Dairy & Eggs": ["milk","cheese","yogurt","egg","butter","cream"],
+    "Produce": ["onion","garlic","tomato","pepper","broccoli","carrot","celery","lettuce","spinach","potato","lemon","lime","basil","ginger","avocado","asparagus","cucumber","apple","banana","herbs"],
+    "Frozen": ["frozen"],
+    "Bakery": ["bread","bun","bagel","tortilla"]
+  };
+  function guessAisle(name){
+    var lower = name.toLowerCase();
+    var found = "Pantry & Grains";
+    Object.keys(AISLE_KEYWORDS).some(function(aisle){
+      if (AISLE_KEYWORDS[aisle].some(function(kw){ return lower.indexOf(kw)>-1; })){ found = aisle; return true; }
+      return false;
     });
-    var steps = Array.isArray(obj.steps) ? obj.steps.filter(Boolean).map(String) : [];
-    return {
-      title: obj.title ? String(obj.title).trim() : "Imported Recipe",
-      category: normalizeCategory(obj.category),
-      servings: obj.servings ? String(obj.servings).trim() : "",
-      prepTime: obj.prepTime ? String(obj.prepTime).trim() : "",
-      ingredients: ingredients,
-      steps: steps,
-      sample: false
-    };
+    return found;
   }
-  function sampleErrorCopy(code){
-    if (["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"].indexOf(code)>-1){
-      sampleHidden = true;
-      return "Recipe import isn't available in this view right now.";
+  function parseQtyToken(tok){
+    if (tok.indexOf(" ")>-1){
+      var parts = tok.split(" ");
+      return parseQtyToken(parts[0]) + parseQtyToken(parts[1]);
     }
-    if (code==="prompt_too_large") return "That's a lot of text — try pasting a shorter excerpt.";
-    if (code==="rate_limited") return "Too many requests right now — wait a moment and try again.";
-    if (code==="session_expired") return "Please sign in again, then retry.";
-    if (code==="invalid_json" || code==="empty_completion" || code==="refused") return "Couldn't read a recipe out of that — try a shorter excerpt.";
-    return "Something went wrong reading that — try again.";
+    if (tok.indexOf("/")>-1){
+      var f = tok.split("/");
+      return parseFloat(f[0])/parseFloat(f[1]);
+    }
+    return parseFloat(tok);
+  }
+  function looksLikeIngredientLine(line){ return QTY_RE.test(line.trim()); }
+  function parseIngredientLine(line){
+    line = line.replace(/^\s*[-*•]\s*/, "").trim();
+    var qtyMatch = line.match(QTY_RE);
+    var qty = null, rest = line;
+    if (qtyMatch){
+      qty = parseQtyToken(qtyMatch[1]);
+      rest = line.slice(qtyMatch[0].length).trim();
+    }
+    var words = rest.split(/\s+/);
+    var unit = "";
+    if (words.length && UNIT_RE.test(words[0])){
+      unit = words[0].replace(/\.$/, "").toLowerCase();
+      rest = words.slice(1).join(" ");
+    }
+    rest = rest.replace(/^of\s+/i, "").trim();
+    if (!rest) return null;
+    return {name: rest, qty: qty, unit: unit, aisle: guessAisle(rest)};
+  }
+  function parseRecipeTextHeuristic(text){
+    var lines = text.split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){return l.length;});
+    if (!lines.length) return {title:"Imported Recipe", category:"Dinner", servings:"", prepTime:"", ingredients:[], steps:[], sample:false};
+
+    var title = lines[0];
+    var bodyLines = lines.slice(1);
+    if (/^(ingredients?|directions?|instructions?|steps?|method)\b/i.test(title) || looksLikeIngredientLine(title)){
+      title = "Imported Recipe";
+      bodyLines = lines;
+    }
+
+    var META_LINE_RE = /^(serves?\s*[:\-]?\s*\d+|\d+\s*servings?|(?:prep|cook|total)\s*time\s*[:\-]?\s*\d+)/i;
+    var ingLines = [], stepLines = [], section = null;
+    bodyLines.forEach(function(line){
+      if (/^ingredients?\b/i.test(line)){ section = 'ing'; return; }
+      if (/^(directions?|instructions?|steps?|method)\b/i.test(line)){ section = 'step'; return; }
+      if (META_LINE_RE.test(line)) return;
+      if (section === 'ing') ingLines.push(line);
+      else if (section === 'step') stepLines.push(line);
+      else if (looksLikeIngredientLine(line)) ingLines.push(line);
+      else stepLines.push(line);
+    });
+
+    var servingsMatch = text.match(/serves?\s*[:\-]?\s*(\d+)/i) || text.match(/(\d+)\s*servings?/i);
+    var servings = servingsMatch ? servingsMatch[1] : "";
+    var prepMatch = text.match(/(?:prep|cook|total)\s*time\s*[:\-]?\s*(\d+\s*(?:min|minutes|hour|hours|hr|hrs)[^\n,;.]*)/i);
+    var prepTime = prepMatch ? prepMatch[1].trim() : "";
+
+    var ingredients = ingLines.map(parseIngredientLine).filter(function(i){ return i && i.name; });
+    var steps = stepLines.map(function(l){ return l.replace(/^\s*(?:\d+[\.\)]|[-*•])\s*/, "").trim(); }).filter(Boolean);
+
+    var lowerAll = text.toLowerCase();
+    var category = "Dinner";
+    if (/breakfast|pancake|omelet|oatmeal/.test(lowerAll)) category = "Breakfast";
+    else if (/\blunch\b|sandwich/.test(lowerAll)) category = "Lunch";
+    else if (/snack|appetizer/.test(lowerAll)) category = "Snack";
+
+    return {title:title, category:category, servings:servings, prepTime:prepTime, ingredients:ingredients, steps:steps, sample:false};
   }
 
   function openAddChoiceSheet(){
@@ -1126,7 +1181,7 @@
   function openImportSheet(){
     openSheet(
       '<h2>Import a Recipe</h2>'+
-      '<p class="import-note">I can\'t open a link myself — copy the recipe\'s text from the site (or a screenshot of it) and use one of the options below. Review the result before saving.</p>'+
+      '<p class="import-note">Paste the recipe\'s ingredients and steps below, or choose a PDF with selectable text. This uses a simple built-in parser (not AI) — review and fix anything it gets wrong before saving.</p>'+
       '<div class="seg-row">'+
         '<button type="button" class="seg-btn active" data-panel="text">Paste Text</button>'+
         '<button type="button" class="seg-btn" data-panel="pdf">PDF</button>'+
@@ -1158,54 +1213,43 @@
       };
     });
 
-    function finishParse(promise){
-      setBusy(true);
-      setStatus("Reading and parsing the recipe — this can take up to a minute...", "busy");
-      promise.then(function(draft){
-        setBusy(false);
-        closeSheet();
-        openRecipeForm(null);
-        // pre-fill the freshly opened form with the parsed draft
-        document.getElementById("f_title").value = draft.title;
-        document.getElementById("f_category").value = draft.category;
-        document.getElementById("f_servings").value = draft.servings;
-        document.getElementById("f_prep").value = draft.prepTime;
-        document.getElementById("f_steps").value = draft.steps.join("\n");
-        var list = document.getElementById("ingList");
-        list.innerHTML = (draft.ingredients.length ? draft.ingredients : [{}]).map(ingredientRowHtml).join("");
-        Array.prototype.forEach.call(document.querySelectorAll(".ing-remove"), function(btn){
-          btn.onclick = function(){ btn.closest(".ingredient-row").remove(); };
-        });
-        var note = document.createElement("p");
-        note.className = "import-note";
-        note.textContent = "Imported — double-check everything below before saving.";
-        document.querySelector(".sheet-inner h2").insertAdjacentElement("afterend", note);
-      }).catch(function(e){
-        setBusy(false);
-        setStatus(sampleErrorCopy(e && e.code), "err");
+    function finishParse(draft){
+      closeSheet();
+      openRecipeForm(null);
+      document.getElementById("f_title").value = draft.title;
+      document.getElementById("f_category").value = draft.category;
+      document.getElementById("f_servings").value = draft.servings;
+      document.getElementById("f_prep").value = draft.prepTime;
+      document.getElementById("f_steps").value = draft.steps.join("\n");
+      var list = document.getElementById("ingList");
+      list.innerHTML = (draft.ingredients.length ? draft.ingredients : [{}]).map(ingredientRowHtml).join("");
+      Array.prototype.forEach.call(document.querySelectorAll(".ing-remove"), function(btn){
+        btn.onclick = function(){ btn.closest(".ingredient-row").remove(); };
       });
+      var note = document.createElement("p");
+      note.className = "import-note";
+      note.textContent = "Imported with a simple text parser — double-check titles, quantities and units below before saving.";
+      document.querySelector(".sheet-inner h2").insertAdjacentElement("afterend", note);
     }
 
     document.getElementById("parseTextBtn").onclick = function(){
-      if (!sampler || sampleHidden){ setStatus("Recipe import isn't available in this view.", "err"); return; }
       var text = document.getElementById("importText").value.trim();
       if (!text){ setStatus("Paste some recipe text first.", "err"); return; }
-      finishParse(sampler.json(recipeSchemaInstructions()+"\n\nRECIPE TEXT:\n"+text.slice(0,6000)).then(sanitizeParsedRecipe));
+      finishParse(parseRecipeTextHeuristic(text.slice(0, IMPORT_TEXT_LIMIT)));
     };
     document.getElementById("parsePdfBtn").onclick = function(){
-      if (!sampler || sampleHidden){ setStatus("Recipe import isn't available in this view.", "err"); return; }
       var files = document.getElementById("importPdf").files;
       if (!files || !files.length){ setStatus("Choose a PDF first.", "err"); return; }
       setBusy(true);
       setStatus("Reading the PDF...", "busy");
       extractPdfText(files[0]).then(function(text){
         text = (text||"").trim();
+        setBusy(false);
         if (text.length < 30){
-          setBusy(false);
           setStatus("Couldn't find readable text in that PDF (it may be a scan).", "err");
           return;
         }
-        finishParse(sampler.json(recipeSchemaInstructions()+"\n\nRECIPE TEXT:\n"+text.slice(0,6000)).then(sanitizeParsedRecipe));
+        finishParse(parseRecipeTextHeuristic(text.slice(0, IMPORT_TEXT_LIMIT)));
       }).catch(function(){
         setBusy(false);
         setStatus("Couldn't read that PDF. Try the Paste Text tab instead.", "err");
@@ -1230,10 +1274,6 @@
 
   // ---------------- render ----------------
   function render(){
-    // A bug in here must never surface as a "save failed" error further up a
-    // promise chain (the data can be safely saved even if a re-render trips) —
-    // so this never throws outward. If it fails, say so plainly and keep the
-    // real message so a report actually points at the cause next time.
     try{
       document.querySelectorAll("nav.bottom button").forEach(function(b){ b.classList.toggle("active", b.getAttribute("data-tab")===state.tab); });
       document.getElementById("fab").style.display = state.tab==="recipes" ? "block" : "none";
@@ -1253,11 +1293,13 @@
     }
   }
 
+  function storageWarningHtml(){
+    return state.storageUnavailable
+      ? '<div class="banner warn"><span>Changes on this page aren\'t being saved — your browser\'s storage is unavailable (common in private/incognito mode). They\'ll be lost when you close this tab.</span></div>'
+      : '';
+  }
   function bannerHtml(){
-    var out = "";
-    if (state.dbUnavailable){
-      out += '<div class="banner warn"><span>Changes on this page aren\'t being saved right now — they\'ll be lost on reload. Try reopening this link.</span></div>';
-    }
+    var out = storageWarningHtml();
     if (state.showBanner){
       out += '<div class="banner"><span>These sample recipes and list items are here to show how it works — edit or delete anytime.</span><button id="dismissBanner">Dismiss</button></div>';
     }
@@ -1319,7 +1361,7 @@
     state.grocery.forEach(function(g){ if (g.store && storeNames.indexOf(g.store)===-1) storeNames.push(g.store); });
     var storeOpts = storeNames.map(function(s){ return '<option value="'+esc(s)+'">'; }).join("");
     var anyChecked = state.grocery.some(function(g){return g.checked;});
-    return (state.dbUnavailable ? '<div class="banner warn"><span>Changes on this page aren\'t being saved right now — they\'ll be lost on reload. Try reopening this link.</span></div>' : "") +
+    return storageWarningHtml() +
       '<h2 class="section-title">Grocery List</h2>'+
       '<div class="add-item-row">'+
         '<input type="text" id="newItemName" placeholder="Add an item">'+
@@ -1334,7 +1376,7 @@
 
   function wireTabEvents(){
     var b = document.getElementById("dismissBanner");
-    if (b) b.onclick = function(){ state.showBanner=false; try{localStorage.setItem("ll_banner_dismissed","1");}catch(e){} render(); };
+    if (b) b.onclick = function(){ state.showBanner=false; try{localStorage.setItem("mealstack_banner_dismissed","1");}catch(e){} render(); };
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-open-recipe]"), function(el){
       el.onclick = function(){ openRecipeDetail(el.getAttribute("data-open-recipe")); };
