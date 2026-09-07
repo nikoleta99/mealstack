@@ -203,6 +203,33 @@
   .day-col{flex:1; min-width:0; display:flex; flex-direction:column; gap:5px;}
   .day-meals{display:flex; flex-wrap:wrap; gap:6px;}
   .day-total{font-family:var(--font-mono); font-size:.7rem; color:var(--ink-soft);}
+  .cal-grid{
+    display:flex; gap:10px; overflow-x:auto; padding:2px 2px 10px;
+    -webkit-overflow-scrolling:touch;
+  }
+  .cal-day{
+    flex:0 0 130px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:10px;
+    display:flex; flex-direction:column; gap:6px;
+    min-height:180px;
+  }
+  .cal-day-head{
+    font-family:var(--font-mono); font-weight:700; font-size:.75rem; letter-spacing:.04em;
+    text-transform:uppercase; color:var(--ink-soft);
+    border-bottom:1px solid var(--line); padding-bottom:6px;
+  }
+  .cal-day-body{display:flex; flex-direction:column; gap:5px; flex:1;}
+  .cal-chip{
+    display:flex; align-items:center; gap:5px; text-align:left; width:100%;
+    background:var(--paper); border:1px solid var(--line); border-radius:8px;
+    padding:5px 7px; font-size:.72rem; cursor:pointer;
+  }
+  .cal-chip .dot{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+  .cal-chip span.txt{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cal-add{align-self:flex-start; padding:4px 8px;}
   .meal-chip{
     display:flex; align-items:center; gap:6px;
     background:var(--paper);
@@ -1353,6 +1380,16 @@
   }
 
   function renderWeek(){
+    var viewToggle = '<div class="seg-row" style="margin-top:0;">'+
+      '<button type="button" class="seg-btn'+(state.weekView!=="calendar"?" active":"")+'" data-week-view="list">List</button>'+
+      '<button type="button" class="seg-btn'+(state.weekView==="calendar"?" active":"")+'" data-week-view="calendar">Calendar</button>'+
+    '</div>';
+    var body = state.weekView==="calendar" ? renderWeekCalendar() : renderWeekList();
+    return bannerHtml() + '<h2 class="section-title">Week Plan</h2>' + viewToggle + body +
+      '<button class="btn-primary" id="genGroceryBtn">Update Grocery List from This Week</button>';
+  }
+
+  function renderWeekList(){
     var rows = DAYS.map(function(d){
       var ids = state.plan.days[d.key]||[];
       var totalCal = 0, anyCal = false;
@@ -1366,8 +1403,28 @@
       var totalHtml = anyCal ? '<div class="day-total">'+totalCal.toLocaleString()+' cal</div>' : '';
       return '<div class="day-row"><div class="day-label">'+d.label+'</div><div class="day-col"><div class="day-meals">'+chips+'</div>'+totalHtml+'</div></div>';
     }).join("");
-    return bannerHtml() + '<h2 class="section-title">Week Plan</h2><div class="week-list">'+rows+'</div>'+
-      '<button class="btn-primary" id="genGroceryBtn">Update Grocery List from This Week</button>';
+    return '<div class="week-list">'+rows+'</div>';
+  }
+
+  function renderWeekCalendar(){
+    var cards = DAYS.map(function(d){
+      var ids = state.plan.days[d.key]||[];
+      var totalCal = 0, anyCal = false;
+      var chips = ids.map(function(id){
+        var r = state.recipes.find(function(x){return x.id===id;});
+        if (!r) return "";
+        if (typeof r.caloriesPerServing==="number"){ totalCal += r.caloriesPerServing; anyCal = true; }
+        return '<button class="cal-chip" data-open-recipe="'+id+'"><span class="dot" style="background:'+catColor(r.category)+'"></span><span class="txt">'+esc(r.title)+'</span></button>';
+      }).join("");
+      var totalHtml = anyCal ? '<div class="day-total">'+totalCal.toLocaleString()+' cal</div>' : '';
+      return '<div class="cal-day">'+
+        '<div class="cal-day-head">'+d.label+'</div>'+
+        '<div class="cal-day-body">'+chips+'</div>'+
+        totalHtml+
+        '<button class="add-meal-btn cal-add" data-day="'+d.key+'" data-label="'+d.label+'"><span class="plus-ic">+</span></button>'+
+      '</div>';
+    }).join("");
+    return '<div class="cal-grid">'+cards+'</div>';
   }
 
   function renderRecipes(){
@@ -1436,6 +1493,9 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll(".add-meal-btn"), function(el){
       el.onclick = function(){ openDayPicker(el.getAttribute("data-day"), el.getAttribute("data-label")); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-week-view]"), function(el){
+      el.onclick = function(){ state.weekView = el.getAttribute("data-week-view"); render(); };
     });
     var gen = document.getElementById("genGroceryBtn");
     if (gen) gen.onclick = generateGroceryList;
