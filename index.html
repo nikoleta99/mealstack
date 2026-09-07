@@ -146,6 +146,24 @@
     margin:0 0 10px;
   }
 
+  /* ---------- HOME TAB ---------- */
+  .home-intro{padding:6px 0 20px;}
+  .home-intro h2{
+    font-family:var(--font-display);
+    font-size:1.15rem;
+    line-height:1.45;
+    margin:0 0 8px;
+    color:var(--ink);
+    text-transform:none;
+    letter-spacing:.01em;
+  }
+  .home-intro p{
+    font-family:var(--font-mono);
+    font-size:.78rem;
+    color:var(--ink-soft);
+    margin:0;
+  }
+
   /* ---------- WEEK TAB ---------- */
   .week-list{
     background:var(--surface);
@@ -525,7 +543,7 @@
 <div class="app-shell">
   <header class="top">
     <h1 id="headerTitle">MealStack</h1>
-    <p id="headerSub">This Week</p>
+    <p id="headerSub">Welcome</p>
   </header>
 
   <main id="main"></main>
@@ -533,7 +551,8 @@
   <button class="fab" id="fab" style="display:none;" aria-label="Add recipe">+</button>
 
   <nav class="bottom">
-    <button data-tab="week" class="active"><span class="ic">&#128197;</span>Week</button>
+    <button data-tab="home" class="active"><span class="ic">&#127968;</span>Home</button>
+    <button data-tab="week"><span class="ic">&#128197;</span>Week</button>
     <button data-tab="recipes"><span class="ic">&#128220;</span>Recipes</button>
     <button data-tab="grocery"><span class="ic">&#128722;</span>List</button>
   </nav>
@@ -626,7 +645,7 @@
 
   // ---------------- state ----------------
   var state = {
-    tab: "week",
+    tab: "home",
     recipeFilter: "All",
     recipes: [],
     plan: {days:{mon:[],tue:[],wed:[],thu:[],fri:[],sat:[],sun:[]}},
@@ -1277,9 +1296,10 @@
     try{
       document.querySelectorAll("nav.bottom button").forEach(function(b){ b.classList.toggle("active", b.getAttribute("data-tab")===state.tab); });
       document.getElementById("fab").style.display = state.tab==="recipes" ? "block" : "none";
-      document.getElementById("headerSub").textContent = state.tab==="week"?"This Week":(state.tab==="recipes"?"Recipe Box":"Grocery List");
+      document.getElementById("headerSub").textContent = state.tab==="home"?"Welcome":(state.tab==="week"?"This Week":(state.tab==="recipes"?"Recipe Box":"Grocery List"));
       var main = document.getElementById("main");
-      if (state.tab==="week") main.innerHTML = renderWeek();
+      if (state.tab==="home") main.innerHTML = renderHome();
+      else if (state.tab==="week") main.innerHTML = renderWeek();
       else if (state.tab==="recipes") main.innerHTML = renderRecipes();
       else main.innerHTML = renderGrocery();
       wireTabEvents();
@@ -1304,6 +1324,20 @@
       out += '<div class="banner"><span>These sample recipes and list items are here to show how it works — edit or delete anytime.</span><button id="dismissBanner">Dismiss</button></div>';
     }
     return out;
+  }
+
+  function renderHome(){
+    var recipeCount = state.recipes.length;
+    var plannedDays = Object.keys(state.plan.days).filter(function(k){ return (state.plan.days[k]||[]).length>0; }).length;
+    var groceryCount = state.grocery.length;
+    return bannerHtml() +
+      '<div class="home-intro">'+
+        '<h2>Start saving your recipes in one place and add them to your weekly routine.</h2>'+
+        '<p>'+recipeCount+' recipe'+(recipeCount===1?'':'s')+' saved &middot; '+plannedDays+' of 7 days planned this week</p>'+
+      '</div>'+
+      '<button type="button" class="choice-row" id="homeAddRecipe"><span class="ic">&#127860;</span><span><span class="lbl">Add a Recipe</span><br><span class="sub">Write one yourself or import from text/PDF</span></span></button>'+
+      '<button type="button" class="choice-row" id="homePlanWeek"><span class="ic">&#128197;</span><span><span class="lbl">Plan This Week</span><br><span class="sub">Assign recipes to your days</span></span></button>'+
+      '<button type="button" class="choice-row" id="homeGroceryList"><span class="ic">&#128722;</span><span><span class="lbl">View Grocery List</span><br><span class="sub">'+groceryCount+' item'+(groceryCount===1?'':'s')+' on your list</span></span></button>';
   }
 
   function renderWeek(){
@@ -1377,6 +1411,13 @@
   function wireTabEvents(){
     var b = document.getElementById("dismissBanner");
     if (b) b.onclick = function(){ state.showBanner=false; try{localStorage.setItem("mealstack_banner_dismissed","1");}catch(e){} render(); };
+
+    var homeAdd = document.getElementById("homeAddRecipe");
+    if (homeAdd) homeAdd.onclick = openAddChoiceSheet;
+    var homePlan = document.getElementById("homePlanWeek");
+    if (homePlan) homePlan.onclick = function(){ state.tab="week"; render(); };
+    var homeGrocery = document.getElementById("homeGroceryList");
+    if (homeGrocery) homeGrocery.onclick = function(){ state.tab="grocery"; render(); };
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-open-recipe]"), function(el){
       el.onclick = function(){ openRecipeDetail(el.getAttribute("data-open-recipe")); };
